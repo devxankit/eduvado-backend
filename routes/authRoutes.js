@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import OTP from '../models/OTP.js';
 import { generateOTP, sendVerificationOTP, sendPasswordResetOTP } from '../helpers/emailService.js';
+import { verifyToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -12,14 +13,17 @@ router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // Check if user already exists
-    let user = await User.findOne({ email });
-    if (user) {
-      return res.status(400).json({ message: 'User already exists' });
+    // Check if a verified user already exists with this email
+    let existingUser = await User.findOne({ email, isVerified: true });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists with this email' });
     }
 
+    // Delete any unverified user with this email
+    await User.deleteOne({ email, isVerified: false });
+
     // Create new user
-    user = new User({
+    const user = new User({
       name,
       email,
       password,
@@ -32,6 +36,9 @@ router.post('/register', async (req, res) => {
 
     // Save user
     await user.save();
+
+    // Delete any existing OTPs for this email
+    await OTP.deleteMany({ email, purpose: 'verification' });
 
     // Generate and save OTP
     const otp = generateOTP();
@@ -212,6 +219,64 @@ router.post('/resend-verification', async (req, res) => {
     await sendVerificationOTP(email, otp);
 
     res.json({ message: 'Verification OTP resent successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get user profile
+router.get('/profile', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update user profile
+router.put('/profile', verifyToken, async (req, res) => {
+  try {
+    const { name, email } = req.body;
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Update fields if provided
+    if (name) user.name = name;
+    if (email && email !== user.email) {
+      // If email is being changed, require re-verification
+      user.email = email;
+      user.isVerified = false;
+      
+      // Send verification OTP to new email
+      const otp = generateOTP();
+      await new OTP({
+        email,
+        otp,
+        purpose: 'verification',
+      }).save();
+      
+      await sendVerificationOTP(email, otp);
+    }
+
+    await user.save();
+    res.json({ 
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        isVerified: user.isVerified
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
