@@ -32,15 +32,11 @@ router.post('/register', async (req, res) => {
     const user = new User({
       name,
       email,
-      password,
+      password, // Password will be hashed by the pre-save middleware
       isVerified: false,
     });
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
-
-    // Save user
+    // Save user (this will trigger the password hashing in the pre-save middleware)
     await user.save();
     console.log(`[Register] Created new user with email: ${email}`);
 
@@ -110,7 +106,10 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    console.log(`[Login] Attempt for email: ${email}`);
+    console.log('[Login] Request received:', {
+      email,
+      passwordLength: password ? password.length : 0
+    });
 
     // Check if user exists
     const user = await User.findOne({ email });
@@ -119,8 +118,16 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'No account found with this email' });
     }
 
-    // Validate password first
-    const isMatch = await bcrypt.compare(password, user.password);
+    console.log('[Login] User found:', {
+      email: user.email,
+      isVerified: user.isVerified,
+      passwordHash: user.password
+    });
+
+    // Validate password using the model's matchPassword method
+    const isMatch = await user.matchPassword(password);
+    console.log(`[Login] Password match result: ${isMatch}`);
+
     if (!isMatch) {
       console.log(`[Login] Failed - Incorrect password for email: ${email}`);
       return res.status(400).json({ message: 'Incorrect password' });
@@ -157,7 +164,7 @@ router.post('/login', async (req, res) => {
     console.error('[Login] Error:', {
       message: error.message,
       stack: error.stack,
-      email: req.body.email
+      email: req.body?.email
     });
     res.status(500).json({ message: 'Server error during login' });
   }
@@ -208,10 +215,9 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ message: 'Invalid or expired OTP' });
     }
 
-    // Update password
+    // Update password - let the pre-save middleware handle the hashing
     const user = await User.findOne({ email });
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(newPassword, salt);
+    user.password = newPassword;  // The pre-save middleware will hash this
     await user.save();
 
     // Delete the used OTP
@@ -219,7 +225,11 @@ router.post('/reset-password', async (req, res) => {
 
     res.json({ message: 'Password reset successful' });
   } catch (error) {
-    console.error(error);
+    console.error('[Reset Password] Error:', {
+      message: error.message,
+      stack: error.stack,
+      email: req.body.email
+    });
     res.status(500).json({ message: 'Server error' });
   }
 });
