@@ -13,14 +13,20 @@ router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
+    console.log(`[Register] Attempt for email: ${email}`);
+
     // Check if a verified user already exists with this email
     let existingUser = await User.findOne({ email, isVerified: true });
     if (existingUser) {
+      console.log(`[Register] Failed - Verified user already exists with email: ${email}`);
       return res.status(400).json({ message: 'User already exists with this email' });
     }
 
     // Delete any unverified user with this email
-    await User.deleteOne({ email, isVerified: false });
+    const deleteResult = await User.deleteOne({ email, isVerified: false });
+    if (deleteResult.deletedCount > 0) {
+      console.log(`[Register] Deleted existing unverified user with email: ${email}`);
+    }
 
     // Create new user
     const user = new User({
@@ -36,9 +42,13 @@ router.post('/register', async (req, res) => {
 
     // Save user
     await user.save();
+    console.log(`[Register] Created new user with email: ${email}`);
 
     // Delete any existing OTPs for this email
-    await OTP.deleteMany({ email, purpose: 'verification' });
+    const otpDeleteResult = await OTP.deleteMany({ email, purpose: 'verification' });
+    if (otpDeleteResult.deletedCount > 0) {
+      console.log(`[Register] Deleted ${otpDeleteResult.deletedCount} existing OTPs for email: ${email}`);
+    }
 
     // Generate and save OTP
     const otp = generateOTP();
@@ -47,16 +57,22 @@ router.post('/register', async (req, res) => {
       otp,
       purpose: 'verification',
     }).save();
+    console.log(`[Register] Generated new OTP for email: ${email}`);
 
     // Send verification email
     await sendVerificationOTP(email, otp);
+    console.log(`[Register] Sent verification email to: ${email}`);
 
     res.status(201).json({
       message: 'Registration successful. Please check your email for verification OTP.',
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('[Register] Error:', {
+      message: error.message,
+      stack: error.stack,
+      email: req.body.email
+    });
+    res.status(500).json({ message: 'Server error during registration' });
   }
 });
 
@@ -93,22 +109,31 @@ router.post('/verify-email', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    
+    console.log(`[Login] Attempt for email: ${email}`);
 
     // Check if user exists
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).json({ message: 'Invalid credentials' });
+      console.log(`[Login] Failed - No account found for email: ${email}`);
+      return res.status(400).json({ message: 'No account found with this email' });
+    }
+
+    // Validate password first
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      console.log(`[Login] Failed - Incorrect password for email: ${email}`);
+      return res.status(400).json({ message: 'Incorrect password' });
     }
 
     // Check if email is verified
     if (!user.isVerified) {
-      return res.status(400).json({ message: 'Please verify your email first' });
-    }
-
-    // Validate password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid credentials' });
+      console.log(`[Login] Failed - Email not verified for user: ${email}`);
+      return res.status(403).json({
+        message: 'Email not verified. Please verify your email first.',
+        requiresVerification: true,
+        email: user.email
+      });
     }
 
     // Generate JWT token
@@ -117,6 +142,8 @@ router.post('/login', async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRE }
     );
+
+    console.log(`[Login] Successful for user: ${email}`);
 
     res.json({
       token,
@@ -127,8 +154,12 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('[Login] Error:', {
+      message: error.message,
+      stack: error.stack,
+      email: req.body.email
+    });
+    res.status(500).json({ message: 'Server error during login' });
   }
 });
 
