@@ -26,6 +26,23 @@ const userSchema = new mongoose.Schema({
     enum: ['user', 'admin'],
     default: 'user'
   },
+  // Subscription related fields
+  hasActiveSubscription: {
+    type: Boolean,
+    default: false
+  },
+  trialStartDate: {
+    type: Date,
+    default: null
+  },
+  trialEndDate: {
+    type: Date,
+    default: null
+  },
+  isTrialActive: {
+    type: Boolean,
+    default: false
+  },
   createdAt: {
     type: Date,
     default: Date.now,
