@@ -137,3 +137,4 @@ console.log('Role: admin');
 console.log('----------------------------------------\n');
 
 createAdminUser();
+
