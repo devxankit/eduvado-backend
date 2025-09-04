@@ -395,4 +395,60 @@ router.get('/payments', verifyToken, async (req, res) => {
   }
 });
 
+// Debug endpoint to check subscription status
+router.get('/debug', verifyToken, async (req, res) => {
+  try {
+    // verifyToken sets req.user to JWT payload, so userId is available
+    const userId = req.user.userId;
+    console.log('=== DEBUG ENDPOINT ===');
+    console.log('User ID:', userId);
+    console.log('Current time:', new Date().toISOString());
+
+    // Find all subscriptions for this user
+    const allSubscriptions = await UserSubscription.find({ userId }).populate('planId');
+    console.log('All subscriptions for user:', allSubscriptions.length);
+
+    // Find active subscriptions
+    const activeSubscriptions = await UserSubscription.find({
+      userId: userId,
+      status: { $in: ['trial', 'active'] }
+    }).populate('planId');
+
+    console.log('Active subscriptions:', activeSubscriptions.length);
+
+    res.json({
+      success: true,
+      debug: {
+        userId: userId,
+        currentTime: new Date().toISOString(),
+        allSubscriptionsCount: allSubscriptions.length,
+        activeSubscriptionsCount: activeSubscriptions.length,
+        allSubscriptions: allSubscriptions.map(sub => ({
+          id: sub._id,
+          status: sub.status,
+          trialEndDate: sub.trialEndDate,
+          endDate: sub.endDate,
+          planType: sub.planType,
+          createdAt: sub.createdAt
+        })),
+        activeSubscriptions: activeSubscriptions.map(sub => ({
+          id: sub._id,
+          status: sub.status,
+          trialEndDate: sub.trialEndDate,
+          endDate: sub.endDate,
+          planType: sub.planType,
+          isActive: isSubscriptionActive(sub)
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error in debug endpoint:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error in debug endpoint',
+      error: error.message
+    });
+  }
+});
+
 export default router;

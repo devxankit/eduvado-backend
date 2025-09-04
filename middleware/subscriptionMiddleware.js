@@ -4,7 +4,8 @@ import { isSubscriptionActive } from '../helpers/razorpayHelper.js';
 // Middleware to check if user has active subscription (including trial)
 export const checkSubscriptionAccess = async (req, res, next) => {
   try {
-    const userId = req.user.userId;
+    // Use _id since protect middleware sets req.user to User document
+    const userId = req.user._id || req.user.userId;
 
     // Find user's active subscription
     const subscription = await UserSubscription.findOne({
@@ -52,9 +53,13 @@ export const checkSubscriptionAccess = async (req, res, next) => {
 // Middleware to check if user can enroll in courses
 export const checkEnrollmentAccess = async (req, res, next) => {
   try {
-    const userId = req.user.userId;
+    // Use _id since protect middleware sets req.user to User document
+    const userId = req.user._id || req.user.userId;
     console.log('=== ENROLLMENT DEBUG ===');
-    console.log('User ID:', userId);
+    console.log('User object:', req.user);
+    console.log('User ID (from _id):', req.user._id);
+    console.log('User ID (from userId):', req.user.userId);
+    console.log('Final User ID:', userId);
     console.log('Current time:', new Date().toISOString());
 
     // Find user's active subscription
@@ -109,7 +114,8 @@ export const checkEnrollmentAccess = async (req, res, next) => {
 // Middleware to get subscription status (for info purposes)
 export const getSubscriptionStatus = async (req, res, next) => {
   try {
-    const userId = req.user.userId;
+    // Use _id since protect middleware sets req.user to User document
+    const userId = req.user._id || req.user.userId;
 
     // Find user's subscription
     const subscription = await UserSubscription.findOne({
