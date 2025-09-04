@@ -53,6 +53,9 @@ export const checkSubscriptionAccess = async (req, res, next) => {
 export const checkEnrollmentAccess = async (req, res, next) => {
   try {
     const userId = req.user.userId;
+    console.log('=== ENROLLMENT DEBUG ===');
+    console.log('User ID:', userId);
+    console.log('Current time:', new Date().toISOString());
 
     // Find user's active subscription
     const subscription = await UserSubscription.findOne({
@@ -60,7 +63,16 @@ export const checkEnrollmentAccess = async (req, res, next) => {
       status: { $in: ['trial', 'active'] }
     }).populate('planId');
 
+    console.log('Found subscription:', subscription ? {
+      id: subscription._id,
+      status: subscription.status,
+      trialEndDate: subscription.trialEndDate,
+      endDate: subscription.endDate,
+      planType: subscription.planType
+    } : 'No subscription found');
+
     if (!subscription) {
+      console.log('No subscription found - returning 403');
       return res.status(403).json({
         success: false,
         message: 'You need a subscription to enroll in courses. Please subscribe first.',
@@ -70,8 +82,10 @@ export const checkEnrollmentAccess = async (req, res, next) => {
 
     // Check if subscription is active
     const isActive = isSubscriptionActive(subscription);
+    console.log('Is subscription active:', isActive);
     
     if (!isActive) {
+      console.log('Subscription not active - returning 403');
       return res.status(403).json({
         success: false,
         message: 'Your subscription has expired. Please renew to enroll in courses.',
@@ -79,6 +93,7 @@ export const checkEnrollmentAccess = async (req, res, next) => {
       });
     }
 
+    console.log('Subscription is active - proceeding to next middleware');
     // Add subscription info to request
     req.subscription = subscription;
     next();

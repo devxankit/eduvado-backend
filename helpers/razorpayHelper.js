@@ -97,14 +97,26 @@ export const calculateTrialEndDate = (startDate = new Date()) => {
 export const isSubscriptionActive = (subscription) => {
   const now = new Date();
   
+  console.log('=== isSubscriptionActive DEBUG ===');
+  console.log('Current time:', now.toISOString());
+  console.log('Subscription status:', subscription.status);
+  console.log('Trial end date (raw):', subscription.trialEndDate);
+  console.log('End date (raw):', subscription.endDate);
+  
   if (subscription.status === 'trial') {
     // Ensure trialEndDate is a Date object for proper comparison
     const trialEndDate = new Date(subscription.trialEndDate);
+    console.log('Trial end date (parsed):', trialEndDate.toISOString());
+    console.log('Now <= trialEndDate:', now <= trialEndDate);
+    console.log('Time difference (ms):', trialEndDate - now);
     return now <= trialEndDate;
   }
   
   // Ensure endDate is a Date object for proper comparison
   const endDate = new Date(subscription.endDate);
+  console.log('End date (parsed):', endDate.toISOString());
+  console.log('Now <= endDate:', now <= endDate);
+  console.log('Time difference (ms):', endDate - now);
   return subscription.status === 'active' && now <= endDate;
 };
 
