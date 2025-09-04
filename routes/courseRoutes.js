@@ -45,7 +45,8 @@ router.get('/category/:category', async (req, res) => {
 router.post('/:id/enroll', protect, checkEnrollmentAccess, async (req, res) => {
   try {
     const courseId = req.params.id;
-    const userId = req.user.userId;
+    // Use _id since protect middleware sets req.user to User document
+    const userId = req.user._id;
 
     // Check if course exists
     const course = await Course.findById(courseId);
