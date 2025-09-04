@@ -98,10 +98,14 @@ export const isSubscriptionActive = (subscription) => {
   const now = new Date();
   
   if (subscription.status === 'trial') {
-    return now <= subscription.trialEndDate;
+    // Ensure trialEndDate is a Date object for proper comparison
+    const trialEndDate = new Date(subscription.trialEndDate);
+    return now <= trialEndDate;
   }
   
-  return subscription.status === 'active' && now <= subscription.endDate;
+  // Ensure endDate is a Date object for proper comparison
+  const endDate = new Date(subscription.endDate);
+  return subscription.status === 'active' && now <= endDate;
 };
 
 // Get remaining days for subscription
@@ -109,10 +113,14 @@ export const getRemainingDays = (subscription) => {
   const now = new Date();
   
   if (subscription.status === 'trial') {
-    const remaining = subscription.trialEndDate - now;
+    // Ensure trialEndDate is a Date object for proper comparison
+    const trialEndDate = new Date(subscription.trialEndDate);
+    const remaining = trialEndDate - now;
     return Math.max(0, Math.ceil(remaining / (1000 * 60 * 60 * 24)));
   }
   
-  const remaining = subscription.endDate - now;
+  // Ensure endDate is a Date object for proper comparison
+  const endDate = new Date(subscription.endDate);
+  const remaining = endDate - now;
   return Math.max(0, Math.ceil(remaining / (1000 * 60 * 60 * 24)));
 };
