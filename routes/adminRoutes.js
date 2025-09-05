@@ -216,6 +216,7 @@ router.put('/courses/:id', protect, admin, async (req, res) => {
       isActive,
       isFeatured
     } = req.body;
+
     
     // Verify category if being updated
     if (category && category !== course.category.toString()) {
@@ -251,6 +252,7 @@ router.put('/courses/:id', protect, admin, async (req, res) => {
 
     const updatedCourse = await course.save();
     await updatedCourse.populate('category', 'name color icon');
+    
     
     res.json({
       success: true,

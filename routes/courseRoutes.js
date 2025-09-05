@@ -1,9 +1,131 @@
 import express from 'express';
 import Course from '../models/Course.js';
+import CourseCategory from '../models/CourseCategory.js';
 import { protect } from '../middleware/authMiddleware.js';
 import { checkEnrollmentAccess } from '../middleware/subscriptionMiddleware.js';
 
 const router = express.Router();
+
+// Public Category Routes
+
+// Get all active categories (public)
+router.get('/categories', async (req, res) => {
+  try {
+    const { sortBy = 'sortOrder', includeInactive = false } = req.query;
+    
+    let query = {};
+    if (!includeInactive) {
+      query.isActive = true;
+    }
+    
+    // Get categories with course counts
+    const categories = await CourseCategory.getCategoriesWithCounts();
+    const filteredCategories = includeInactive ? categories : categories.filter(cat => cat.isActive);
+    
+    // Sort categories
+    const sortOptions = {
+      'sortOrder': { sortOrder: 1, name: 1 },
+      'name': { name: 1 },
+      'courseCount': { courseCount: -1 },
+      'createdAt': { createdAt: -1 }
+    };
+    
+    filteredCategories.sort((a, b) => {
+      const sort = sortOptions[sortBy] || sortOptions.sortOrder;
+      for (const [key, direction] of Object.entries(sort)) {
+        if (a[key] !== b[key]) {
+          return direction === 1 ? a[key] - b[key] : b[key] - a[key];
+        }
+      }
+      return 0;
+    });
+    
+    res.json({
+      success: true,
+      categories: filteredCategories,
+      total: filteredCategories.length
+    });
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Get single category by ID (public)
+router.get('/categories/:id', async (req, res) => {
+  try {
+    const category = await CourseCategory.findById(req.params.id);
+    if (!category) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Category not found' 
+      });
+    }
+    
+    // Get courses in this category (only active courses)
+    const courses = await Course.find({ 
+      category: req.params.id, 
+      isActive: true 
+    })
+      .select('title description price duration image instructor level tags createdAt')
+      .sort({ createdAt: -1 });
+    
+    res.json({
+      success: true,
+      category: {
+        ...category.toObject(),
+        courses
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching category:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Get single category by slug (public)
+router.get('/categories/slug/:slug', async (req, res) => {
+  try {
+    const category = await CourseCategory.findOne({ 
+      slug: req.params.slug,
+      isActive: true 
+    });
+    if (!category) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Category not found' 
+      });
+    }
+    
+    // Get courses in this category (only active courses)
+    const courses = await Course.find({ 
+      category: category._id, 
+      isActive: true 
+    })
+      .select('title description price duration image instructor level tags createdAt')
+      .sort({ createdAt: -1 });
+    
+    res.json({
+      success: true,
+      category: {
+        ...category.toObject(),
+        courses
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching category by slug:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
 
 // Get all courses (public, but enrollment requires subscription)
 router.get('/', async (req, res) => {
