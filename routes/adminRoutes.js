@@ -9,31 +9,184 @@ import { protect, admin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// Get all courses (admin)
+// Course Management Routes
+
+// Get all courses with advanced filtering (admin)
 router.get('/courses', protect, admin, async (req, res) => {
   try {
-    const courses = await Course.find({}).populate('category', 'name color icon');
-    res.json(courses);
+    const { 
+      page = 1, 
+      limit = 10, 
+      category, 
+      search, 
+      level, 
+      isActive, 
+      isFeatured,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Build query
+    let query = {};
+    if (category) query.category = category;
+    if (level) query.level = level;
+    if (isActive !== undefined) query.isActive = isActive === 'true';
+    if (isFeatured !== undefined) query.isFeatured = isFeatured === 'true';
+    if (search) {
+      query.$text = { $search: search };
+    }
+    
+    // Build sort
+    const sortOptions = {
+      'createdAt': { createdAt: sortOrder === 'desc' ? -1 : 1 },
+      'title': { title: sortOrder === 'desc' ? -1 : 1 },
+      'price': { price: sortOrder === 'desc' ? -1 : 1 },
+      'enrollmentCount': { enrollmentCount: sortOrder === 'desc' ? -1 : 1 },
+      'rating': { 'rating.average': sortOrder === 'desc' ? -1 : 1 }
+    };
+    
+    const sort = sortOptions[sortBy] || sortOptions.createdAt;
+    
+    const courses = await Course.find(query)
+      .populate('category', 'name color icon courseCount')
+      .sort(sort)
+      .skip(skip)
+      .limit(parseInt(limit));
+    
+    const total = await Course.countDocuments(query);
+    
+    // Get category information for filters
+    const categories = await CourseCategory.find({ isActive: true })
+      .select('name _id')
+      .sort({ name: 1 });
+    
+    res.json({
+      success: true,
+      courses,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total,
+        limit: parseInt(limit)
+      },
+      filters: {
+        categories,
+        levels: ['Beginner', 'Intermediate', 'Advanced', 'Expert']
+      }
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error fetching courses:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Get single course (admin)
+router.get('/courses/:id', protect, admin, async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id)
+      .populate('category', 'name color icon description');
+    
+    if (!course) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Course not found' 
+      });
+    }
+    
+    res.json({
+      success: true,
+      course
+    });
+  } catch (error) {
+    console.error('Error fetching course:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 });
 
 // Create new course (admin)
 router.post('/courses', protect, admin, async (req, res) => {
   try {
-    const { title, description, category, price, duration, image } = req.body;
+    const { 
+      title, 
+      description, 
+      category, 
+      price, 
+      duration, 
+      image, 
+      instructor,
+      level,
+      tags,
+      prerequisites,
+      learningOutcomes
+    } = req.body;
+    
+    // Validate required fields
+    if (!title || !description || !category || !price || !duration || !image) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Title, description, category, price, duration, and image are required' 
+      });
+    }
+    
+    // Verify category exists and is active
+    const categoryExists = await CourseCategory.findById(category);
+    if (!categoryExists) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Selected category does not exist. Please create categories first in the Categories page.' 
+      });
+    }
+    if (!categoryExists.isActive) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Selected category is inactive. Please select an active category or activate the category first.' 
+      });
+    }
+    
     const course = await Course.create({
-      title,
-      description,
+      title: title.trim(),
+      description: description.trim(),
       category,
-      price,
-      duration,
-      image
+      price: parseFloat(price),
+      duration: duration.trim(),
+      image: image.trim(),
+      instructor: instructor?.trim(),
+      level: level || 'Beginner',
+      tags: tags || [],
+      prerequisites: prerequisites || [],
+      learningOutcomes: learningOutcomes || []
     });
-    res.status(201).json(course);
+    
+    // Populate category for response
+    await course.populate('category', 'name color icon');
+    
+    res.status(201).json({
+      success: true,
+      message: 'Course created successfully',
+      course
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error creating course:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false,
+        message: 'Validation error',
+        errors: messages 
+      });
+    }
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 });
 
@@ -42,22 +195,82 @@ router.put('/courses/:id', protect, admin, async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
     if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Course not found' 
+      });
     }
 
-    const { title, description, category, price, duration, image, isActive } = req.body;
-    course.title = title || course.title;
-    course.description = description || course.description;
-    course.category = category || course.category;
-    course.price = price || course.price;
-    course.duration = duration || course.duration;
-    course.image = image || course.image;
-    course.isActive = isActive !== undefined ? isActive : course.isActive;
+    const { 
+      title, 
+      description, 
+      category, 
+      price, 
+      duration, 
+      image, 
+      instructor,
+      level,
+      tags,
+      prerequisites,
+      learningOutcomes,
+      isActive,
+      isFeatured
+    } = req.body;
+    
+    // Verify category if being updated
+    if (category && category !== course.category.toString()) {
+      const categoryExists = await CourseCategory.findById(category);
+      if (!categoryExists) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Selected category does not exist. Please create categories first in the Categories page.' 
+        });
+      }
+      if (!categoryExists.isActive) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Selected category is inactive. Please select an active category or activate the category first.' 
+        });
+      }
+    }
+    
+    // Update fields
+    if (title) course.title = title.trim();
+    if (description) course.description = description.trim();
+    if (category) course.category = category;
+    if (price !== undefined) course.price = parseFloat(price);
+    if (duration) course.duration = duration.trim();
+    if (image) course.image = image.trim();
+    if (instructor !== undefined) course.instructor = instructor?.trim();
+    if (level) course.level = level;
+    if (tags) course.tags = tags;
+    if (prerequisites) course.prerequisites = prerequisites;
+    if (learningOutcomes) course.learningOutcomes = learningOutcomes;
+    if (isActive !== undefined) course.isActive = isActive;
+    if (isFeatured !== undefined) course.isFeatured = isFeatured;
 
     const updatedCourse = await course.save();
-    res.json(updatedCourse);
+    await updatedCourse.populate('category', 'name color icon');
+    
+    res.json({
+      success: true,
+      message: 'Course updated successfully',
+      course: updatedCourse
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error updating course:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false,
+        message: 'Validation error',
+        errors: messages 
+      });
+    }
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 });
 
@@ -66,25 +279,229 @@ router.delete('/courses/:id', protect, admin, async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
     if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Course not found' 
+      });
     }
 
     await course.deleteOne();
-    res.json({ message: 'Course removed' });
+    res.json({ 
+      success: true,
+      message: 'Course deleted successfully' 
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error deleting course:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Toggle course status (admin)
+router.patch('/courses/:id/toggle', protect, admin, async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Course not found' 
+      });
+    }
+
+    course.isActive = !course.isActive;
+    await course.save();
+    await course.populate('category', 'name color icon');
+    
+    res.json({
+      success: true,
+      message: `Course ${course.isActive ? 'activated' : 'deactivated'} successfully`,
+      course
+    });
+  } catch (error) {
+    console.error('Error toggling course status:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Toggle course featured status (admin)
+router.patch('/courses/:id/feature', protect, admin, async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Course not found' 
+      });
+    }
+
+    course.isFeatured = !course.isFeatured;
+    await course.save();
+    await course.populate('category', 'name color icon');
+    
+    res.json({
+      success: true,
+      message: `Course ${course.isFeatured ? 'featured' : 'unfeatured'} successfully`,
+      course
+    });
+  } catch (error) {
+    console.error('Error toggling course featured status:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Get course statistics (admin)
+router.get('/courses/stats', protect, admin, async (req, res) => {
+  try {
+    const totalCourses = await Course.countDocuments();
+    const activeCourses = await Course.countDocuments({ isActive: true });
+    const featuredCourses = await Course.countDocuments({ isFeatured: true });
+    
+    const categoryStats = await Course.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 },
+          avgPrice: { $avg: '$price' }
+        }
+      },
+      {
+        $lookup: {
+          from: 'coursecategories',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      {
+        $unwind: '$category'
+      },
+      {
+        $project: {
+          categoryName: '$category.name',
+          count: 1,
+          avgPrice: { $round: ['$avgPrice', 2] }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      }
+    ]);
+    
+    const levelStats = await Course.aggregate([
+      {
+        $group: {
+          _id: '$level',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      }
+    ]);
+    
+    res.json({
+      success: true,
+      stats: {
+        totalCourses,
+        activeCourses,
+        featuredCourses,
+        categoryStats,
+        levelStats
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching course statistics:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 });
 
 // Course Category Management Routes
 
-// Get all course categories (admin)
+// Get all course categories with course counts (admin)
 router.get('/courseCategories', protect, admin, async (req, res) => {
   try {
-    const categories = await CourseCategory.find({}).sort({ sortOrder: 1, name: 1 });
-    res.json(categories);
+    const { includeInactive = false, sortBy = 'sortOrder' } = req.query;
+    
+    let query = {};
+    if (!includeInactive) {
+      query.isActive = true;
+    }
+    
+    const categories = await CourseCategory.getCategoriesWithCounts();
+    const filteredCategories = includeInactive ? categories : categories.filter(cat => cat.isActive);
+    
+    // Sort categories
+    const sortOptions = {
+      'sortOrder': { sortOrder: 1, name: 1 },
+      'name': { name: 1 },
+      'courseCount': { courseCount: -1 },
+      'createdAt': { createdAt: -1 }
+    };
+    
+    filteredCategories.sort((a, b) => {
+      const sort = sortOptions[sortBy] || sortOptions.sortOrder;
+      for (const [key, direction] of Object.entries(sort)) {
+        if (a[key] !== b[key]) {
+          return direction === 1 ? a[key] - b[key] : b[key] - a[key];
+        }
+      }
+      return 0;
+    });
+    
+    res.json({
+      success: true,
+      categories: filteredCategories,
+      total: filteredCategories.length
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error fetching categories:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Get single course category (admin)
+router.get('/courseCategories/:id', protect, admin, async (req, res) => {
+  try {
+    const category = await CourseCategory.findById(req.params.id);
+    if (!category) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Category not found' 
+      });
+    }
+    
+    // Get courses in this category
+    const courses = await Course.find({ category: req.params.id })
+      .select('title price isActive createdAt')
+      .sort({ createdAt: -1 });
+    
+    res.json({
+      success: true,
+      category: {
+        ...category.toObject(),
+        courses
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching category:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 });
 
@@ -93,22 +510,52 @@ router.post('/courseCategories', protect, admin, async (req, res) => {
   try {
     const { name, description, color, icon, sortOrder } = req.body;
     
+    // Validate required fields
+    if (!name || !description) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Name and description are required' 
+      });
+    }
+    
     // Check if category name already exists
-    const existingCategory = await CourseCategory.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
+    const existingCategory = await CourseCategory.findOne({ 
+      name: { $regex: new RegExp(`^${name}$`, 'i') } 
+    });
     if (existingCategory) {
-      return res.status(400).json({ message: 'Category name already exists' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Category name already exists' 
+      });
     }
     
     const category = await CourseCategory.create({
-      name,
-      description,
+      name: name.trim(),
+      description: description.trim(),
       color: color || '#3B82F6',
       icon: icon || 'BookOpen',
       sortOrder: sortOrder || 0
     });
-    res.status(201).json(category);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Category created successfully',
+      category
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error creating category:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false,
+        message: 'Validation error',
+        errors: messages 
+      });
+    }
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 });
 
@@ -117,7 +564,10 @@ router.put('/courseCategories/:id', protect, admin, async (req, res) => {
   try {
     const category = await CourseCategory.findById(req.params.id);
     if (!category) {
-      return res.status(404).json({ message: 'Category not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Category not found' 
+      });
     }
 
     const { name, description, color, icon, isActive, sortOrder } = req.body;
@@ -129,21 +579,42 @@ router.put('/courseCategories/:id', protect, admin, async (req, res) => {
         _id: { $ne: req.params.id }
       });
       if (existingCategory) {
-        return res.status(400).json({ message: 'Category name already exists' });
+        return res.status(400).json({ 
+          success: false,
+          message: 'Category name already exists' 
+        });
       }
     }
     
-    category.name = name || category.name;
-    category.description = description || category.description;
-    category.color = color || category.color;
-    category.icon = icon || category.icon;
-    category.isActive = isActive !== undefined ? isActive : category.isActive;
-    category.sortOrder = sortOrder !== undefined ? sortOrder : category.sortOrder;
+    // Update fields
+    if (name) category.name = name.trim();
+    if (description) category.description = description.trim();
+    if (color) category.color = color;
+    if (icon) category.icon = icon;
+    if (isActive !== undefined) category.isActive = isActive;
+    if (sortOrder !== undefined) category.sortOrder = sortOrder;
 
     const updatedCategory = await category.save();
-    res.json(updatedCategory);
+    
+    res.json({
+      success: true,
+      message: 'Category updated successfully',
+      category: updatedCategory
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error updating category:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false,
+        message: 'Validation error',
+        errors: messages 
+      });
+    }
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 });
 
@@ -152,21 +623,60 @@ router.delete('/courseCategories/:id', protect, admin, async (req, res) => {
   try {
     const category = await CourseCategory.findById(req.params.id);
     if (!category) {
-      return res.status(404).json({ message: 'Category not found' });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Category not found' 
+      });
     }
 
     // Check if any courses are using this category
     const coursesUsingCategory = await Course.countDocuments({ category: req.params.id });
     if (coursesUsingCategory > 0) {
       return res.status(400).json({ 
-        message: `Cannot delete category. ${coursesUsingCategory} course(s) are using this category.` 
+        success: false,
+        message: `Cannot delete category. ${coursesUsingCategory} course(s) are using this category. Please reassign or delete these courses first.` 
       });
     }
 
     await category.deleteOne();
-    res.json({ message: 'Category removed' });
+    res.json({ 
+      success: true,
+      message: 'Category deleted successfully' 
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error deleting category:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
+  }
+});
+
+// Toggle category status (admin)
+router.patch('/courseCategories/:id/toggle', protect, admin, async (req, res) => {
+  try {
+    const category = await CourseCategory.findById(req.params.id);
+    if (!category) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Category not found' 
+      });
+    }
+
+    category.isActive = !category.isActive;
+    await category.save();
+    
+    res.json({
+      success: true,
+      message: `Category ${category.isActive ? 'activated' : 'deactivated'} successfully`,
+      category
+    });
+  } catch (error) {
+    console.error('Error toggling category status:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 });
 
