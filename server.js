@@ -7,7 +7,7 @@ import { authRouter } from "./routes/authRoutes.js";
 import { adminRouter } from "./routes/adminRoutes.js";
 import { courseRouter } from "./routes/courseRoutes.js";
 import contentRouter from "./routes/contentRoutes.js";
-import subscriptionRoutes from './routes/subscriptionRoutes.js';
+import subscriptionRoutes from './routes/subscriptionRoutesNew.js';
 
 dotenv.config();
 
