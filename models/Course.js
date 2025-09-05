@@ -10,9 +10,9 @@ const courseSchema = new mongoose.Schema({
     required: true
   },
   category: {
-    type: String,
-    required: true,
-    enum: ['JEE', 'NEET', 'Other']
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'CourseCategory',
+    required: true
   },
   price: {
     type: Number,

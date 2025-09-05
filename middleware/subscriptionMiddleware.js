@@ -1,4 +1,5 @@
 import UserSubscription from '../models/UserSubscription.js';
+import User from '../models/User.js';
 import { isSubscriptionActive } from '../helpers/razorpayHelper.js';
 
 // Middleware to check if user has active subscription (including trial)
@@ -14,6 +15,30 @@ export const checkSubscriptionAccess = async (req, res, next) => {
     }).populate('planId');
 
     if (!subscription) {
+      // Check if user has an expired trial that needs payment
+      const expiredTrialSubscription = await UserSubscription.findOne({
+        userId: userId,
+        status: 'expired',
+        paymentStatus: 'pending',
+        isTrialPeriod: true
+      }).populate('planId');
+
+      if (expiredTrialSubscription) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your trial period has expired. Please complete payment to continue accessing courses.',
+          trialExpired: true,
+          requiresPayment: true,
+          subscription: {
+            id: expiredTrialSubscription._id,
+            status: expiredTrialSubscription.status,
+            planType: expiredTrialSubscription.planType,
+            amount: expiredTrialSubscription.amount,
+            trialEndDate: expiredTrialSubscription.trialEndDate
+          }
+        });
+      }
+
       return res.status(403).json({
         success: false,
         message: 'No active subscription found. Please subscribe to access courses.',
@@ -25,6 +50,32 @@ export const checkSubscriptionAccess = async (req, res, next) => {
     const isActive = isSubscriptionActive(subscription);
     
     if (!isActive) {
+      // If trial expired, update status to expired
+      if (subscription.status === 'trial' && subscription.paymentStatus === 'pending') {
+        subscription.status = 'expired';
+        await subscription.save();
+        
+        // Update user subscription status
+        await User.findByIdAndUpdate(userId, {
+          hasActiveSubscription: false,
+          isTrialActive: false
+        });
+
+        return res.status(403).json({
+          success: false,
+          message: 'Your trial period has expired. Please complete payment to continue accessing courses.',
+          trialExpired: true,
+          requiresPayment: true,
+          subscription: {
+            id: subscription._id,
+            status: 'expired',
+            planType: subscription.planType,
+            amount: subscription.amount,
+            trialEndDate: subscription.trialEndDate
+          }
+        });
+      }
+
       return res.status(403).json({
         success: false,
         message: 'Your subscription has expired. Please renew to continue accessing courses.',

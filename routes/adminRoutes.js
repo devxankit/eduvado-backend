@@ -1,5 +1,6 @@
 import express from 'express';
 import Course from '../models/Course.js';
+import CourseCategory from '../models/CourseCategory.js';
 import User from '../models/User.js';
 import SubscriptionPlan from '../models/SubscriptionPlan.js';
 import UserSubscription from '../models/UserSubscription.js';
@@ -11,7 +12,7 @@ const router = express.Router();
 // Get all courses (admin)
 router.get('/courses', protect, admin, async (req, res) => {
   try {
-    const courses = await Course.find({});
+    const courses = await Course.find({}).populate('category', 'name color icon');
     res.json(courses);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -70,6 +71,100 @@ router.delete('/courses/:id', protect, admin, async (req, res) => {
 
     await course.deleteOne();
     res.json({ message: 'Course removed' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Course Category Management Routes
+
+// Get all course categories (admin)
+router.get('/courseCategories', protect, admin, async (req, res) => {
+  try {
+    const categories = await CourseCategory.find({}).sort({ sortOrder: 1, name: 1 });
+    res.json(categories);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Create new course category (admin)
+router.post('/courseCategories', protect, admin, async (req, res) => {
+  try {
+    const { name, description, color, icon, sortOrder } = req.body;
+    
+    // Check if category name already exists
+    const existingCategory = await CourseCategory.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
+    if (existingCategory) {
+      return res.status(400).json({ message: 'Category name already exists' });
+    }
+    
+    const category = await CourseCategory.create({
+      name,
+      description,
+      color: color || '#3B82F6',
+      icon: icon || 'BookOpen',
+      sortOrder: sortOrder || 0
+    });
+    res.status(201).json(category);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Update course category (admin)
+router.put('/courseCategories/:id', protect, admin, async (req, res) => {
+  try {
+    const category = await CourseCategory.findById(req.params.id);
+    if (!category) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+
+    const { name, description, color, icon, isActive, sortOrder } = req.body;
+    
+    // Check if category name already exists for other categories
+    if (name && name !== category.name) {
+      const existingCategory = await CourseCategory.findOne({ 
+        name: { $regex: new RegExp(`^${name}$`, 'i') },
+        _id: { $ne: req.params.id }
+      });
+      if (existingCategory) {
+        return res.status(400).json({ message: 'Category name already exists' });
+      }
+    }
+    
+    category.name = name || category.name;
+    category.description = description || category.description;
+    category.color = color || category.color;
+    category.icon = icon || category.icon;
+    category.isActive = isActive !== undefined ? isActive : category.isActive;
+    category.sortOrder = sortOrder !== undefined ? sortOrder : category.sortOrder;
+
+    const updatedCategory = await category.save();
+    res.json(updatedCategory);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Delete course category (admin)
+router.delete('/courseCategories/:id', protect, admin, async (req, res) => {
+  try {
+    const category = await CourseCategory.findById(req.params.id);
+    if (!category) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+
+    // Check if any courses are using this category
+    const coursesUsingCategory = await Course.countDocuments({ category: req.params.id });
+    if (coursesUsingCategory > 0) {
+      return res.status(400).json({ 
+        message: `Cannot delete category. ${coursesUsingCategory} course(s) are using this category.` 
+      });
+    }
+
+    await category.deleteOne();
+    res.json({ message: 'Category removed' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

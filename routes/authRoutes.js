@@ -267,6 +267,28 @@ router.post('/resend-verification', async (req, res) => {
   }
 });
 
+// Verify token endpoint
+router.get('/verify', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json({ 
+      valid: true, 
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error('Token verification error:', error);
+    res.status(401).json({ message: 'Invalid token' });
+  }
+});
+
 // Get user profile
 router.get('/profile', verifyToken, async (req, res) => {
   try {

@@ -8,7 +8,7 @@ const router = express.Router();
 // Get all courses (public, but enrollment requires subscription)
 router.get('/', async (req, res) => {
   try {
-    const courses = await Course.find({ isActive: true });
+    const courses = await Course.find({ isActive: true }).populate('category', 'name color icon');
     res.json(courses);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -18,7 +18,7 @@ router.get('/', async (req, res) => {
 // Get course by ID (public, but enrollment requires subscription)
 router.get('/:id', async (req, res) => {
   try {
-    const course = await Course.findById(req.params.id);
+    const course = await Course.findById(req.params.id).populate('category', 'name color icon');
     if (!course) {
       return res.status(404).json({ message: 'Course not found' });
     }
@@ -34,7 +34,7 @@ router.get('/category/:category', async (req, res) => {
     const courses = await Course.find({
       category: req.params.category,
       isActive: true
-    });
+    }).populate('category', 'name color icon');
     res.json(courses);
   } catch (error) {
     res.status(500).json({ message: error.message });

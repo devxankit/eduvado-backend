@@ -13,6 +13,7 @@
     "create-admin": "node create-admin-user.js",
     "create-plans": "node create-subscription-plans.js",
     "update-subscriptions": "node scripts/updateSubscriptionStatus.js",
+    "migrate-categories": "node scripts/migrateCategories.js",
     "create-test-users": "node create-test-users.js",
     "create-test-subscriptions": "node create-test-subscriptions.js",
     "create-test-data": "node create-test-subscriptions.js --create-courses"

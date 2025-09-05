@@ -95,16 +95,39 @@ router.post('/create', verifyToken, async (req, res) => {
       });
     }
 
-    // Check if user already has an active subscription
-    const existingSubscription = await UserSubscription.findOne({
+    // Check if user already has an active subscription (excluding expired trials)
+    const existingActiveSubscription = await UserSubscription.findOne({
       userId: userId,
       status: { $in: ['trial', 'active'] }
     });
 
-    if (existingSubscription) {
+    if (existingActiveSubscription) {
+      // Check if the existing subscription is actually active
+      const isActive = isSubscriptionActive(existingActiveSubscription);
+      if (isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'You already have an active subscription'
+        });
+      }
+    }
+
+    // Check if user has an expired trial subscription that needs payment
+    const expiredTrialSubscription = await UserSubscription.findOne({
+      userId: userId,
+      status: 'expired',
+      paymentStatus: 'pending',
+      isTrialPeriod: true
+    });
+
+    if (expiredTrialSubscription) {
       return res.status(400).json({
         success: false,
-        message: 'You already have an active subscription'
+        message: 'Your trial period has expired. Please complete payment to continue your subscription.',
+        requiresPayment: true,
+        subscriptionId: expiredTrialSubscription._id,
+        planType: expiredTrialSubscription.planType,
+        amount: expiredTrialSubscription.amount
       });
     }
 
@@ -192,6 +215,16 @@ router.post('/create-order', verifyToken, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Payment already completed for this subscription'
+      });
+    }
+
+    // Allow payment for expired trial subscriptions
+    if (subscription.status === 'expired' && subscription.paymentStatus === 'pending') {
+      // This is an expired trial that needs payment - allow it
+    } else if (subscription.status !== 'trial' && subscription.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot create payment order for this subscription status'
       });
     }
 
@@ -391,6 +424,55 @@ router.get('/payments', verifyToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching payment history'
+    });
+  }
+});
+
+// Get payment status for expired trial
+router.get('/trial-payment-status', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    // Find expired trial subscription that needs payment
+    const expiredTrialSubscription = await UserSubscription.findOne({
+      userId: userId,
+      status: 'expired',
+      paymentStatus: 'pending',
+      isTrialPeriod: true
+    }).populate('planId');
+
+    if (!expiredTrialSubscription) {
+      return res.json({
+        success: true,
+        requiresPayment: false,
+        message: 'No expired trial subscription found'
+      });
+    }
+
+    const remainingDays = getRemainingDays(expiredTrialSubscription);
+    const isActive = isSubscriptionActive(expiredTrialSubscription);
+
+    res.json({
+      success: true,
+      requiresPayment: true,
+      subscription: {
+        id: expiredTrialSubscription._id,
+        status: expiredTrialSubscription.status,
+        planType: expiredTrialSubscription.planType,
+        planDetails: expiredTrialSubscription.planId,
+        amount: expiredTrialSubscription.amount,
+        trialEndDate: expiredTrialSubscription.trialEndDate,
+        endDate: expiredTrialSubscription.endDate,
+        isActive: isActive,
+        remainingDays: remainingDays,
+        paymentStatus: expiredTrialSubscription.paymentStatus
+      }
+    });
+  } catch (error) {
+    console.error('Error checking trial payment status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error checking trial payment status'
     });
   }
 });
