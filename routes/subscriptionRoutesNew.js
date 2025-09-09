@@ -33,19 +33,19 @@ router.get('/plans', async (req, res) => {
         {
           planType: 'monthly',
           description: 'Monthly subscription with full access to all courses',
-          price: 299,
+          price: 99,
           isActive: true
         },
         {
           planType: 'quarterly',
           description: 'Quarterly subscription with full access to all courses',
-          price: 799,
+          price: 299,
           isActive: true
         },
         {
           planType: 'yearly',
           description: 'Yearly subscription with full access to all courses',
-          price: 2499,
+          price: 999,
           isActive: true
         }
       ];
@@ -317,29 +317,44 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     console.log('Found expired trial subscription:', expiredTrialSubscription._id);
 
     // Create Razorpay order
-    const orderData = {
-      amount: expiredTrialSubscription.amount * 100, // Convert to paise
-      currency: 'INR',
-      receipt: `subscription_${expiredTrialSubscription._id}`,
-      notes: {
-        subscriptionId: expiredTrialSubscription._id.toString(),
-        userId: userId,
-        planType: expiredTrialSubscription.planType
-      }
-    };
+    const orderResult = await createOrder(
+      expiredTrialSubscription.amount,
+      'INR',
+      `subscription_${expiredTrialSubscription._id}`
+    );
 
-    const order = await createOrder(orderData);
+    if (!orderResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Error creating payment order',
+        error: orderResult.error
+      });
+    }
+
+    const order = orderResult.order;
     console.log('Razorpay order created:', order.id);
+
+    // Update subscription with order ID
+    expiredTrialSubscription.razorpayOrderId = order.id;
+    await expiredTrialSubscription.save();
+
+    // Create payment record
+    const payment = new Payment({
+      userId: userId,
+      subscriptionId: expiredTrialSubscription._id,
+      planId: expiredTrialSubscription.planId,
+      planType: expiredTrialSubscription.planType,
+      amount: expiredTrialSubscription.amount,
+      razorpayOrderId: order.id,
+      status: 'created'
+    });
+
+    await payment.save();
 
     res.json({
       success: true,
       message: 'Payment order created successfully',
-      order: {
-        id: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        receipt: order.receipt
-      },
+      order: order,
       subscription: {
         id: expiredTrialSubscription._id,
         planType: expiredTrialSubscription.planType,
@@ -368,9 +383,9 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
     console.log('PaymentId:', paymentId);
 
     // Verify payment with Razorpay
-    const isVerified = await verifyPayment(orderId, paymentId, signature);
+    const verificationResult = verifyPayment(orderId, paymentId, signature);
     
-    if (!isVerified) {
+    if (!verificationResult.success || !verificationResult.isAuthentic) {
       return res.status(400).json({
         success: false,
         message: 'Payment verification failed'
@@ -393,7 +408,9 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
     // Update subscription status
     subscription.status = 'active';
     subscription.paymentStatus = 'completed';
-    subscription.paymentDate = new Date();
+    subscription.razorpayPaymentId = paymentId;
+    subscription.razorpaySignature = signature;
+    subscription.isTrialPeriod = false;
     await subscription.save();
 
     // Update user status
@@ -402,19 +419,16 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
       isTrialActive: false
     });
 
-    // Create payment record
-    const payment = new Payment({
-      userId: userId,
-      subscriptionId: subscription._id,
-      orderId: orderId,
-      paymentId: paymentId,
-      amount: subscription.amount,
-      currency: 'INR',
-      status: 'completed',
-      paymentDate: new Date()
-    });
-
-    await payment.save();
+    // Update existing payment record
+    await Payment.findOneAndUpdate(
+      { razorpayOrderId: orderId },
+      {
+        razorpayPaymentId: paymentId,
+        razorpaySignature: signature,
+        status: 'captured',
+        paymentCapturedAt: new Date()
+      }
+    );
 
     console.log('Payment verified and subscription activated');
 
