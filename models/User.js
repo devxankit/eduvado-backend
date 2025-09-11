@@ -47,6 +47,17 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // Profile picture fields
+  profilePicture: {
+    publicId: {
+      type: String,
+      default: null
+    },
+    url: {
+      type: String,
+      default: null
+    }
+  },
   createdAt: {
     type: Date,
     default: Date.now,

@@ -11,7 +11,11 @@ import {
   calculateSubscriptionEndDate,
   calculateTrialEndDate,
   isSubscriptionActive,
-  getRemainingDays
+  getRemainingDays,
+  validatePaymentAmount,
+  formatAmount,
+  getSubscriptionStatus,
+  isSubscriptionExpired
 } from '../helpers/razorpayHelper.js';
 
 const router = express.Router();
@@ -295,18 +299,19 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     console.log('=== CREATE PAYMENT DEBUG ===');
     console.log('UserId:', userId);
 
-    // Find expired trial subscription
-    const expiredTrialSubscription = await UserSubscription.findOne({
+    // Find expired trial subscription or any subscription that needs payment
+    const subscriptionNeedingPayment = await UserSubscription.findOne({
       userId: userId,
-      status: 'expired',
-      paymentStatus: 'pending',
-      isTrialPeriod: true
-    });
+      $or: [
+        { status: 'expired', paymentStatus: 'pending', isTrialPeriod: true },
+        { status: 'trial', paymentStatus: 'pending' }
+      ]
+    }).sort({ createdAt: -1 });
 
-    if (!expiredTrialSubscription) {
+    if (!subscriptionNeedingPayment) {
       return res.status(404).json({
         success: false,
-        message: 'No expired trial subscription found that requires payment',
+        message: 'No subscription found that requires payment',
         debug: {
           userId,
           totalSubscriptions: await UserSubscription.countDocuments({ userId })
@@ -314,13 +319,38 @@ router.post('/create-payment', verifyToken, async (req, res) => {
       });
     }
 
-    console.log('Found expired trial subscription:', expiredTrialSubscription._id);
+    console.log('Found subscription needing payment:', subscriptionNeedingPayment._id);
+
+    // Validate payment amount
+    if (!validatePaymentAmount(subscriptionNeedingPayment.amount, subscriptionNeedingPayment.planType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment amount for the selected plan'
+      });
+    }
+
+    // Check if there's already a pending payment for this subscription
+    const existingPayment = await Payment.findOne({
+      subscriptionId: subscriptionNeedingPayment._id,
+      status: { $in: ['created', 'authorized'] }
+    });
+
+    if (existingPayment) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment order already exists for this subscription',
+        existingOrder: {
+          id: existingPayment.razorpayOrderId,
+          status: existingPayment.status
+        }
+      });
+    }
 
     // Create Razorpay order
     const orderResult = await createOrder(
-      expiredTrialSubscription.amount,
+      subscriptionNeedingPayment.amount,
       'INR',
-      `subscription_${expiredTrialSubscription._id}`
+      `subscription_${subscriptionNeedingPayment._id}_${Date.now()}`
     );
 
     if (!orderResult.success) {
@@ -335,16 +365,16 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     console.log('Razorpay order created:', order.id);
 
     // Update subscription with order ID
-    expiredTrialSubscription.razorpayOrderId = order.id;
-    await expiredTrialSubscription.save();
+    subscriptionNeedingPayment.razorpayOrderId = order.id;
+    await subscriptionNeedingPayment.save();
 
     // Create payment record
     const payment = new Payment({
       userId: userId,
-      subscriptionId: expiredTrialSubscription._id,
-      planId: expiredTrialSubscription.planId,
-      planType: expiredTrialSubscription.planType,
-      amount: expiredTrialSubscription.amount,
+      subscriptionId: subscriptionNeedingPayment._id,
+      planId: subscriptionNeedingPayment.planId,
+      planType: subscriptionNeedingPayment.planType,
+      amount: subscriptionNeedingPayment.amount,
       razorpayOrderId: order.id,
       status: 'created'
     });
@@ -354,11 +384,18 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     res.json({
       success: true,
       message: 'Payment order created successfully',
-      order: order,
+      order: {
+        id: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        receipt: order.receipt,
+        status: order.status
+      },
       subscription: {
-        id: expiredTrialSubscription._id,
-        planType: expiredTrialSubscription.planType,
-        amount: expiredTrialSubscription.amount
+        id: subscriptionNeedingPayment._id,
+        planType: subscriptionNeedingPayment.planType,
+        amount: subscriptionNeedingPayment.amount,
+        formattedAmount: formatAmount(subscriptionNeedingPayment.amount)
       }
     });
 
@@ -366,7 +403,8 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     console.error('Error creating payment order:', error);
     res.status(500).json({
       success: false,
-      message: 'Error creating payment order'
+      message: 'Error creating payment order',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -382,26 +420,43 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
     console.log('OrderId:', orderId);
     console.log('PaymentId:', paymentId);
 
+    // Validate required fields
+    if (!orderId || !paymentId || !signature) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required payment verification fields'
+      });
+    }
+
     // Verify payment with Razorpay
     const verificationResult = verifyPayment(orderId, paymentId, signature);
     
     if (!verificationResult.success || !verificationResult.isAuthentic) {
+      console.error('Payment verification failed:', verificationResult);
       return res.status(400).json({
         success: false,
-        message: 'Payment verification failed'
+        message: 'Payment verification failed - invalid signature'
       });
     }
 
-    // Find the subscription
+    // Find the subscription by order ID
     const subscription = await UserSubscription.findOne({
       userId: userId,
-      paymentStatus: 'pending'
-    }).sort({ createdAt: -1 });
+      razorpayOrderId: orderId
+    });
 
     if (!subscription) {
       return res.status(404).json({
         success: false,
-        message: 'No pending subscription found'
+        message: 'No subscription found for this payment order'
+      });
+    }
+
+    // Check if payment is already processed
+    if (subscription.paymentStatus === 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment has already been processed for this subscription'
       });
     }
 
@@ -411,6 +466,11 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
     subscription.razorpayPaymentId = paymentId;
     subscription.razorpaySignature = signature;
     subscription.isTrialPeriod = false;
+    
+    // Update start date to current time for active subscription
+    subscription.startDate = new Date();
+    subscription.endDate = calculateSubscriptionEndDate(subscription.planType, subscription.startDate);
+    
     await subscription.save();
 
     // Update user status
@@ -420,17 +480,22 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
     });
 
     // Update existing payment record
-    await Payment.findOneAndUpdate(
+    const payment = await Payment.findOneAndUpdate(
       { razorpayOrderId: orderId },
       {
         razorpayPaymentId: paymentId,
         razorpaySignature: signature,
         status: 'captured',
         paymentCapturedAt: new Date()
-      }
+      },
+      { new: true }
     );
 
-    console.log('Payment verified and subscription activated');
+    if (!payment) {
+      console.warn('Payment record not found for order:', orderId);
+    }
+
+    console.log('Payment verified and subscription activated successfully');
 
     res.json({
       success: true,
@@ -442,7 +507,15 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
         startDate: subscription.startDate,
         endDate: subscription.endDate,
         amount: subscription.amount,
-        paymentStatus: subscription.paymentStatus
+        formattedAmount: formatAmount(subscription.amount),
+        paymentStatus: subscription.paymentStatus,
+        remainingDays: getRemainingDays(subscription)
+      },
+      payment: {
+        id: payment?._id,
+        orderId: orderId,
+        paymentId: paymentId,
+        status: 'captured'
       }
     });
 
@@ -450,7 +523,109 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
     console.error('Error verifying payment:', error);
     res.status(500).json({
       success: false,
-      message: 'Error verifying payment'
+      message: 'Error verifying payment',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Manual subscription status update (for testing/admin)
+router.post('/update-status', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    console.log('=== MANUAL STATUS UPDATE ===');
+    console.log('UserId:', userId);
+
+    // Get all user subscriptions
+    const subscriptions = await UserSubscription.find({ userId });
+    
+    let updatedCount = 0;
+    
+    for (const subscription of subscriptions) {
+      const currentStatus = getSubscriptionStatus(subscription);
+      
+      if (currentStatus !== subscription.status) {
+        console.log(`Updating subscription ${subscription._id} from ${subscription.status} to ${currentStatus}`);
+        
+        subscription.status = currentStatus;
+        
+        if (currentStatus === 'expired' && subscription.isTrialPeriod) {
+          subscription.paymentStatus = 'pending';
+        }
+        
+        await subscription.save();
+        updatedCount++;
+      }
+    }
+
+    // Update user flags
+    const user = await User.findById(userId);
+    const hasActiveSubscription = subscriptions.some(sub => 
+      sub.status === 'active' || (sub.status === 'trial' && !isSubscriptionExpired(sub))
+    );
+    const hasTrialSubscription = subscriptions.some(sub => 
+      sub.status === 'trial' && !isSubscriptionExpired(sub)
+    );
+    const hasUsedTrial = subscriptions.some(sub => sub.isTrialPeriod);
+
+    await User.findByIdAndUpdate(userId, {
+      hasActiveSubscription,
+      isTrialActive: hasTrialSubscription,
+      hasUsedTrial
+    });
+
+    res.json({
+      success: true,
+      message: 'Subscription status updated successfully',
+      updatedSubscriptions: updatedCount,
+      userFlags: {
+        hasActiveSubscription,
+        isTrialActive: hasTrialSubscription,
+        hasUsedTrial
+      }
+    });
+
+  } catch (error) {
+    console.error('Error updating subscription status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating subscription status'
+    });
+  }
+});
+
+// Get payment history for user
+router.get('/payment-history', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    
+    const payments = await Payment.find({ userId })
+      .sort({ createdAt: -1 })
+      .populate('subscriptionId', 'planType status')
+      .populate('planId', 'planType description price');
+
+    res.json({
+      success: true,
+      payments: payments.map(payment => ({
+        id: payment._id,
+        amount: payment.amount,
+        formattedAmount: formatAmount(payment.amount),
+        currency: payment.currency,
+        status: payment.status,
+        planType: payment.planType,
+        orderId: payment.razorpayOrderId,
+        paymentId: payment.razorpayPaymentId,
+        createdAt: payment.createdAt,
+        paymentCapturedAt: payment.paymentCapturedAt
+      }))
+    });
+
+  } catch (error) {
+    console.error('Error fetching payment history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching payment history'
     });
   }
 });

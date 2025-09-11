@@ -1,22 +1,52 @@
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Initialize Razorpay with validation
+let razorpay = null;
+
+// Function to initialize Razorpay
+const initializeRazorpay = () => {
+  if (razorpay) return razorpay; // Already initialized
+  
+  try {
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+      console.warn('Razorpay credentials not found in environment variables - running in test mode');
+      return null;
+    } else {
+      razorpay = new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID,
+        key_secret: process.env.RAZORPAY_KEY_SECRET,
+      });
+      console.log('✅ Razorpay initialized successfully');
+      return razorpay;
+    }
+  } catch (error) {
+    console.warn('Failed to initialize Razorpay:', error.message);
+    return null;
+  }
+};
+
+// Initialize on module load
+initializeRazorpay();
 
 // Create Razorpay order
 export const createOrder = async (amount, currency = 'INR', receipt = null) => {
   try {
+    const razorpayInstance = initializeRazorpay();
+    if (!razorpayInstance) {
+      return {
+        success: false,
+        error: 'Razorpay not initialized - check credentials'
+      };
+    }
+
     const options = {
       amount: amount * 100, // Razorpay expects amount in paise
       currency: currency,
-      receipt: receipt || `receipt_${Date.now()}`,
+      receipt: receipt || `receipt_${Date.now()}`.substring(0, 40), // Razorpay receipt max 40 chars
     };
 
-    const order = await razorpay.orders.create(options);
+    const order = await razorpayInstance.orders.create(options);
     return {
       success: true,
       order: order
@@ -33,6 +63,13 @@ export const createOrder = async (amount, currency = 'INR', receipt = null) => {
 // Verify payment signature
 export const verifyPayment = (razorpayOrderId, razorpayPaymentId, razorpaySignature) => {
   try {
+    if (!process.env.RAZORPAY_KEY_SECRET) {
+      return {
+        success: false,
+        error: 'Razorpay key secret not configured'
+      };
+    }
+
     const body = razorpayOrderId + "|" + razorpayPaymentId;
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
@@ -57,7 +94,15 @@ export const verifyPayment = (razorpayOrderId, razorpayPaymentId, razorpaySignat
 // Get payment details from Razorpay
 export const getPaymentDetails = async (paymentId) => {
   try {
-    const payment = await razorpay.payments.fetch(paymentId);
+    const razorpayInstance = initializeRazorpay();
+    if (!razorpayInstance) {
+      return {
+        success: false,
+        error: 'Razorpay not initialized - check credentials'
+      };
+    }
+
+    const payment = await razorpayInstance.payments.fetch(paymentId);
     return {
       success: true,
       payment: payment
@@ -135,4 +180,65 @@ export const getRemainingDays = (subscription) => {
   const endDate = new Date(subscription.endDate);
   const remaining = endDate - now;
   return Math.max(0, Math.ceil(remaining / (1000 * 60 * 60 * 24)));
+};
+
+// Check if subscription is expired (for cronjob)
+export const isSubscriptionExpired = (subscription) => {
+  const now = new Date();
+  
+  if (subscription.status === 'trial') {
+    return now > new Date(subscription.trialEndDate);
+  }
+  
+  return subscription.status === 'active' && now > new Date(subscription.endDate);
+};
+
+// Get subscription status for cronjob
+export const getSubscriptionStatus = (subscription) => {
+  const now = new Date();
+  
+  if (subscription.status === 'trial') {
+    const trialEndDate = new Date(subscription.trialEndDate);
+    if (now > trialEndDate) {
+      return 'expired';
+    }
+    return 'trial';
+  }
+  
+  if (subscription.status === 'active') {
+    const endDate = new Date(subscription.endDate);
+    if (now > endDate) {
+      return 'expired';
+    }
+    return 'active';
+  }
+  
+  return subscription.status;
+};
+
+// Validate payment amount
+export const validatePaymentAmount = (amount, planType) => {
+  const expectedAmounts = {
+    monthly: 99,
+    quarterly: 299,
+    yearly: 999
+  };
+  
+  return expectedAmounts[planType] === amount;
+};
+
+// Format amount for display
+export const formatAmount = (amount) => {
+  return `₹${amount}`;
+};
+
+// Get plan duration in days
+export const getPlanDurationInDays = (planType) => {
+  const durations = {
+    monthly: 30,
+    quarterly: 90,
+    yearly: 360
+  };
+  
+  return durations[planType] || 30;
 };

@@ -274,13 +274,14 @@ router.get('/verify', verifyToken, async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    res.json({ 
+    res.json({
       valid: true, 
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        role: user.role
+        role: user.role,
+        profilePicture: user.profilePicture
       }
     });
   } catch (error) {
@@ -332,13 +333,14 @@ router.put('/profile', verifyToken, async (req, res) => {
     }
 
     await user.save();
-    res.json({ 
+    res.json({
       message: 'Profile updated successfully',
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        isVerified: user.isVerified
+        isVerified: user.isVerified,
+        profilePicture: user.profilePicture
       }
     });
   } catch (error) {

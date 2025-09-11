@@ -8,6 +8,8 @@ import { adminRouter } from "./routes/adminRoutes.js";
 import { courseRouter } from "./routes/courseRoutes.js";
 import contentRouter from "./routes/contentRoutes.js";
 import subscriptionRoutes from './routes/subscriptionRoutesNew.js';
+import { profileRouter } from "./routes/profileRoutes.js";
+import subscriptionCronService from './services/subscriptionCronService.js';
 
 dotenv.config();
 
@@ -51,6 +53,7 @@ app.use("/api/courses", courseRouter);
 app.use("/api/content", contentRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/profile', profileRouter);
 
 // Debug route to test if server is working
 app.get("/api/test", (req, res) => {
@@ -86,4 +89,8 @@ app.use((err, req, res, next) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Start subscription cron service
+  subscriptionCronService.start();
+  console.log('Subscription cron service initialized');
 });
