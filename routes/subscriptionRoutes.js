@@ -387,10 +387,11 @@ router.post('/create-order', verifyToken, async (req, res) => {
     }
 
     // Create Razorpay order
+    const receipt = `ord_${subscription._id.toString().slice(-8)}_${Date.now().toString().slice(-8)}`;
     const orderResult = await createOrder(
       subscription.amount,
       'INR',
-      `order_${subscription._id}_${Date.now()}`
+      receipt
     );
 
     if (!orderResult.success) {
@@ -691,10 +692,11 @@ router.post('/create-trial-payment', verifyToken, async (req, res) => {
     }
 
     // Create Razorpay order
+    const receipt = `trial_${trialSubscription._id.toString().slice(-8)}_${Date.now().toString().slice(-8)}`;
     const orderResult = await createOrder(
       trialSubscription.amount,
       'INR',
-      `order_${trialSubscription._id}_${Date.now()}`
+      receipt
     );
 
     if (!orderResult.success) {
@@ -992,10 +994,11 @@ async function handleCreatePayment(res, user, expiredTrialSubscription) {
   }
 
   // Create Razorpay order
+  const receipt = `exp_${expiredTrialSubscription._id.toString().slice(-8)}_${Date.now().toString().slice(-8)}`;
   const orderResult = await createOrder(
     expiredTrialSubscription.amount,
     'INR',
-    `order_${expiredTrialSubscription._id}_${Date.now()}`
+    receipt
   );
 
   if (!orderResult.success) {

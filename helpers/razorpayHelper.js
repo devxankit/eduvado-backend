@@ -51,7 +51,7 @@ export const createOrder = async (amount, currency = 'INR', receipt = null) => {
     const options = {
       amount: amount * 100, // Razorpay expects amount in paise
       currency: currency,
-      receipt: receipt || `receipt_${Date.now()}`.substring(0, 40), // Razorpay receipt max 40 chars
+      receipt: (receipt || `receipt_${Date.now()}`).substring(0, 40), // Razorpay receipt max 40 chars
     };
 
     const order = await razorpayInstance.orders.create(options);

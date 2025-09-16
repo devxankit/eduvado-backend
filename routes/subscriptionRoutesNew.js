@@ -320,12 +320,26 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     }
 
     console.log('Found subscription needing payment:', subscriptionNeedingPayment._id);
+    console.log('Subscription amount:', subscriptionNeedingPayment.amount);
+    console.log('Subscription planType:', subscriptionNeedingPayment.planType);
 
     // Validate payment amount
-    if (!validatePaymentAmount(subscriptionNeedingPayment.amount, subscriptionNeedingPayment.planType)) {
+    const isValidAmount = validatePaymentAmount(subscriptionNeedingPayment.amount, subscriptionNeedingPayment.planType);
+    console.log('Payment amount validation result:', isValidAmount);
+    
+    if (!isValidAmount) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid payment amount for the selected plan'
+        message: 'Invalid payment amount for the selected plan',
+        debug: {
+          amount: subscriptionNeedingPayment.amount,
+          planType: subscriptionNeedingPayment.planType,
+          expectedAmounts: {
+            monthly: 99,
+            quarterly: 499,
+            yearly: 899
+          }
+        }
       });
     }
 
@@ -335,7 +349,14 @@ router.post('/create-payment', verifyToken, async (req, res) => {
       status: { $in: ['created', 'authorized'] }
     });
 
+    console.log('Existing payment check:', existingPayment ? 'Found existing payment' : 'No existing payment');
+
     if (existingPayment) {
+      console.log('Existing payment details:', {
+        id: existingPayment._id,
+        razorpayOrderId: existingPayment.razorpayOrderId,
+        status: existingPayment.status
+      });
       return res.status(400).json({
         success: false,
         message: 'Payment order already exists for this subscription',
@@ -347,11 +368,20 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     }
 
     // Create Razorpay order
+    const receipt = `sub_${subscriptionNeedingPayment._id.toString().slice(-8)}_${Date.now().toString().slice(-8)}`;
+    console.log('About to create Razorpay order with:', {
+      amount: subscriptionNeedingPayment.amount,
+      currency: 'INR',
+      receipt: receipt
+    });
+    
     const orderResult = await createOrder(
       subscriptionNeedingPayment.amount,
       'INR',
-      `subscription_${subscriptionNeedingPayment._id}_${Date.now()}`
+      receipt
     );
+    
+    console.log('Razorpay order result:', orderResult);
 
     if (!orderResult.success) {
       console.error('Razorpay order creation failed:', orderResult.error);
