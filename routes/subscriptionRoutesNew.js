@@ -354,10 +354,16 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     );
 
     if (!orderResult.success) {
+      console.error('Razorpay order creation failed:', orderResult.error);
       return res.status(500).json({
         success: false,
-        message: 'Error creating payment order',
-        error: orderResult.error
+        message: orderResult.error || 'Error creating payment order',
+        error: orderResult.error,
+        debug: {
+          amount: subscriptionNeedingPayment.amount,
+          planType: subscriptionNeedingPayment.planType,
+          subscriptionId: subscriptionNeedingPayment._id
+        }
       });
     }
 

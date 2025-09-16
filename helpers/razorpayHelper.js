@@ -32,13 +32,21 @@ initializeRazorpay();
 // Create Razorpay order
 export const createOrder = async (amount, currency = 'INR', receipt = null) => {
   try {
+    console.log('=== RAZORPAY ORDER CREATION DEBUG ===');
+    console.log('Amount:', amount);
+    console.log('Currency:', currency);
+    console.log('Receipt:', receipt);
+    
     const razorpayInstance = initializeRazorpay();
     if (!razorpayInstance) {
+      console.error('Razorpay initialization failed - check credentials');
       return {
         success: false,
         error: 'Razorpay not initialized - check credentials'
       };
     }
+    
+    console.log('Razorpay instance initialized successfully');
 
     const options = {
       amount: amount * 100, // Razorpay expects amount in paise
@@ -47,6 +55,7 @@ export const createOrder = async (amount, currency = 'INR', receipt = null) => {
     };
 
     const order = await razorpayInstance.orders.create(options);
+    console.log('Razorpay order created successfully:', order.id);
     return {
       success: true,
       order: order
@@ -220,8 +229,8 @@ export const getSubscriptionStatus = (subscription) => {
 export const validatePaymentAmount = (amount, planType) => {
   const expectedAmounts = {
     monthly: 99,
-    quarterly: 299,
-    yearly: 999
+    quarterly: 499,
+    yearly: 899
   };
   
   return expectedAmounts[planType] === amount;
