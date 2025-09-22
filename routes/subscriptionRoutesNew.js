@@ -15,7 +15,8 @@ import {
   validatePaymentAmount,
   formatAmount,
   getSubscriptionStatus,
-  isSubscriptionExpired
+  isSubscriptionExpired,
+  canCreatePayment
 } from '../helpers/razorpayHelper.js';
 
 const router = express.Router();
@@ -299,23 +300,34 @@ router.post('/create-payment', verifyToken, async (req, res) => {
     console.log('=== CREATE PAYMENT DEBUG ===');
     console.log('UserId:', userId);
 
-    // Find expired trial subscription or any subscription that needs payment
+    // Find expired trial subscription that needs payment
     const subscriptionNeedingPayment = await UserSubscription.findOne({
       userId: userId,
-      $or: [
-        { status: 'expired', paymentStatus: 'pending', isTrialPeriod: true },
-        { status: 'trial', paymentStatus: 'pending' }
-      ]
+      status: 'expired',
+      paymentStatus: 'pending',
+      isTrialPeriod: true
     }).sort({ createdAt: -1 });
 
     if (!subscriptionNeedingPayment) {
       return res.status(404).json({
         success: false,
-        message: 'No subscription found that requires payment',
+        message: 'No expired trial subscription found that requires payment. Please complete your trial period first.',
         debug: {
           userId,
           totalSubscriptions: await UserSubscription.countDocuments({ userId })
         }
+      });
+    }
+
+    // Validate if payment can be created for this subscription
+    const paymentValidation = canCreatePayment(subscriptionNeedingPayment);
+    
+    if (!paymentValidation.canPay) {
+      return res.status(400).json({
+        success: false,
+        message: paymentValidation.reason,
+        trialEndDate: paymentValidation.trialEndDate,
+        remainingDays: paymentValidation.remainingDays
       });
     }
 

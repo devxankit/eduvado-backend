@@ -17,7 +17,11 @@
     "migrate-categories": "node scripts/migrateCategories.js",
     "create-test-users": "node create-test-users.js",
     "create-test-subscriptions": "node create-test-subscriptions.js",
-    "create-test-data": "node create-test-subscriptions.js --create-courses"
+    "create-test-data": "node create-test-subscriptions.js --create-courses",
+    "test-trial-flow": "node test-simple-trial-flow.js",
+    "test-payment-flow": "node test-trial-payment-flow.js",
+    "test-all-apis": "node test-all-apis.js",
+    "test-all-apis-fixed": "node test-all-apis-fixed.js"
   },
   "keywords": [],
   "author": "",

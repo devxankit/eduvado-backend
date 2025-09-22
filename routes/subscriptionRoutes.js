@@ -13,7 +13,8 @@ import {
   calculateSubscriptionEndDate,
   calculateTrialEndDate,
   isSubscriptionActive,
-  getRemainingDays
+  getRemainingDays,
+  canCreatePayment
 } from '../helpers/razorpayHelper.js';
 
 const router = express.Router();
@@ -376,13 +377,18 @@ router.post('/create-order', verifyToken, async (req, res) => {
       });
     }
 
-    // Allow payment for expired trial subscriptions
-    if (subscription.status === 'expired' && subscription.paymentStatus === 'pending') {
-      // This is an expired trial that needs payment - allow it
-    } else if (subscription.status !== 'trial' && subscription.status !== 'active') {
+    // Validate if payment can be created for this subscription
+    const paymentValidation = canCreatePayment(subscription);
+    
+    if (!paymentValidation.canPay) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot create payment order for this subscription status'
+        message: paymentValidation.reason,
+        trialEndDate: paymentValidation.trialEndDate,
+        remainingDays: paymentValidation.remainingDays,
+        subscriptionStatus: subscription.status,
+        isTrialPeriod: subscription.isTrialPeriod,
+        paymentStatus: subscription.paymentStatus
       });
     }
 
@@ -650,17 +656,19 @@ router.post('/create-trial-payment', verifyToken, async (req, res) => {
       });
     }
 
-    // Find any trial subscription (expired or not) that needs payment
+    // Find expired trial subscription that needs payment
     let trialSubscription = await UserSubscription.findOne({
       userId: userId,
+      status: 'expired',
       isTrialPeriod: true,
       paymentStatus: 'pending'
     }).populate('planId');
 
-    // If no trial subscription found, check if there's one that should be expired
+    // If no expired trial found, check if there's one that should be expired
     if (!trialSubscription) {
       trialSubscription = await UserSubscription.findOne({
         userId: userId,
+        status: 'trial',
         isTrialPeriod: true
       }).populate('planId');
 
@@ -672,6 +680,14 @@ router.post('/create-trial-payment', verifyToken, async (req, res) => {
         await User.findByIdAndUpdate(userId, {
           hasActiveSubscription: false,
           isTrialActive: false
+        });
+      } else if (trialSubscription && isSubscriptionActive(trialSubscription)) {
+        // Trial is still active - don't allow payment
+        return res.status(400).json({
+          success: false,
+          message: 'Your trial period is still active. Please wait for the trial to expire before making payment.',
+          trialEndDate: trialSubscription.trialEndDate,
+          remainingDays: getRemainingDays(trialSubscription)
         });
       }
     }

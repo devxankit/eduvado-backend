@@ -251,3 +251,33 @@ export const getPlanDurationInDays = (planType) => {
   
   return durations[planType] || 30;
 };
+
+// Validate if payment can be created for a subscription
+export const canCreatePayment = (subscription) => {
+  const now = new Date();
+  
+  // Only allow payment for expired trial subscriptions
+  if (subscription.status !== 'expired' || !subscription.isTrialPeriod || subscription.paymentStatus !== 'pending') {
+    return {
+      canPay: false,
+      reason: 'Only expired trial subscriptions with pending payment status can create payment orders'
+    };
+  }
+  
+  // Ensure the trial has actually expired
+  const trialEndDate = new Date(subscription.trialEndDate);
+  if (now <= trialEndDate) {
+    const remainingDays = Math.ceil((trialEndDate - now) / (1000 * 60 * 60 * 24));
+    return {
+      canPay: false,
+      reason: 'Trial period is still active',
+      trialEndDate: trialEndDate,
+      remainingDays: remainingDays
+    };
+  }
+  
+  return {
+    canPay: true,
+    reason: 'Payment can be created'
+  };
+};
