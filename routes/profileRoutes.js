@@ -6,15 +6,29 @@ import { deleteImageFromCloudinary } from '../helpers/cloudinaryHelper.js';
 
 const router = express.Router();
 
+// Global error handler for upload routes
+router.use((error, req, res, next) => {
+  if (error) {
+    console.error('Upload route error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Upload error occurred',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+  next();
+});
+
 // Upload profile picture
 router.post('/upload-picture', 
   verifyToken, 
   uploadProfilePicture, 
-  handleUploadError, 
   checkFileUpload,
   async (req, res) => {
     try {
       const userId = req.user.userId;
+      console.log('Uploading profile picture for user:', userId);
+      
       const user = await User.findById(userId);
       
       if (!user) {
@@ -24,15 +38,24 @@ router.post('/upload-picture',
         });
       }
 
-      // Delete old profile picture if exists
-      if (user.profilePicture && user.profilePicture.publicId) {
-        try {
-          await deleteImageFromCloudinary(user.profilePicture.publicId);
-        } catch (error) {
-          console.error('Error deleting old profile picture:', error);
-          // Continue with upload even if deletion fails
-        }
+      // Validate file upload
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No file uploaded'
+        });
       }
+
+      console.log('File uploaded successfully:', {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        public_id: req.file.public_id,
+        secure_url: req.file.secure_url
+      });
+
+      // Store old profile picture info for cleanup
+      const oldProfilePicture = user.profilePicture;
 
       // Update user with new profile picture
       user.profilePicture = {
@@ -40,7 +63,20 @@ router.post('/upload-picture',
         url: req.file.secure_url
       };
 
+      // Save user first
       await user.save();
+
+      // Delete old profile picture after successful save
+      if (oldProfilePicture && oldProfilePicture.publicId) {
+        try {
+          console.log('Deleting old profile picture:', oldProfilePicture.publicId);
+          await deleteImageFromCloudinary(oldProfilePicture.publicId);
+          console.log('✅ Old profile picture deleted successfully');
+        } catch (error) {
+          console.error('Error deleting old profile picture:', error);
+          // Don't fail the request if old image deletion fails
+        }
+      }
 
       res.json({
         success: true,
@@ -55,7 +91,8 @@ router.post('/upload-picture',
       console.error('Error uploading profile picture:', error);
       res.status(500).json({
         success: false,
-        message: 'Error uploading profile picture'
+        message: 'Error uploading profile picture',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
@@ -65,11 +102,12 @@ router.post('/upload-picture',
 router.put('/update-picture', 
   verifyToken, 
   uploadProfilePicture, 
-  handleUploadError, 
   checkFileUpload,
   async (req, res) => {
     try {
       const userId = req.user.userId;
+      console.log('Updating profile picture for user:', userId);
+      
       const user = await User.findById(userId);
       
       if (!user) {
@@ -79,15 +117,24 @@ router.put('/update-picture',
         });
       }
 
-      // Delete old profile picture if exists
-      if (user.profilePicture && user.profilePicture.publicId) {
-        try {
-          await deleteImageFromCloudinary(user.profilePicture.publicId);
-        } catch (error) {
-          console.error('Error deleting old profile picture:', error);
-          // Continue with upload even if deletion fails
-        }
+      // Validate file upload
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No file uploaded'
+        });
       }
+
+      console.log('File updated successfully:', {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        public_id: req.file.public_id,
+        secure_url: req.file.secure_url
+      });
+
+      // Store old profile picture info for cleanup
+      const oldProfilePicture = user.profilePicture;
 
       // Update user with new profile picture
       user.profilePicture = {
@@ -95,7 +142,20 @@ router.put('/update-picture',
         url: req.file.secure_url
       };
 
+      // Save user first
       await user.save();
+
+      // Delete old profile picture after successful save
+      if (oldProfilePicture && oldProfilePicture.publicId) {
+        try {
+          console.log('Deleting old profile picture:', oldProfilePicture.publicId);
+          await deleteImageFromCloudinary(oldProfilePicture.publicId);
+          console.log('✅ Old profile picture deleted successfully');
+        } catch (error) {
+          console.error('Error deleting old profile picture:', error);
+          // Don't fail the request if old image deletion fails
+        }
+      }
 
       res.json({
         success: true,
@@ -110,7 +170,8 @@ router.put('/update-picture',
       console.error('Error updating profile picture:', error);
       res.status(500).json({
         success: false,
-        message: 'Error updating profile picture'
+        message: 'Error updating profile picture',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
@@ -189,6 +250,36 @@ router.get('/picture-info', verifyToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error getting profile picture info'
+    });
+  }
+});
+
+// Test endpoint to check configuration
+router.get('/test-config', verifyToken, async (req, res) => {
+  try {
+    const config = {
+      cloudinary: {
+        cloudName: process.env.CLOUDINARY_CLOUD_NAME ? 'Set' : 'Missing',
+        apiKey: process.env.CLOUDINARY_API_KEY ? 'Set' : 'Missing',
+        apiSecret: process.env.CLOUDINARY_API_SECRET ? 'Set' : 'Missing'
+      },
+      user: {
+        id: req.user.userId,
+        email: req.user.email
+      }
+    };
+
+    res.json({
+      success: true,
+      message: 'Configuration check',
+      config
+    });
+
+  } catch (error) {
+    console.error('Error checking configuration:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error checking configuration'
     });
   }
 });
