@@ -8,7 +8,7 @@ import { adminRouter } from "./routes/adminRoutes.js";
 import { courseRouter } from "./routes/courseRoutes.js";
 import contentRouter from "./routes/contentRoutes.js";
 import subscriptionRoutes from './routes/subscriptionRoutesNew.js';
-import { profileRouter } from "./routes/profileRoutes.js";
+import profileRouter from "./routes/profileRoutes.js";
 import subscriptionCronService from './services/subscriptionCronService.js';
 
 dotenv.config();
@@ -47,10 +47,16 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Add timeout middleware
+// Add timeout middleware with longer timeout for uploads
 app.use((req, res, next) => {
-  req.setTimeout(30000); // 30 seconds timeout
-  res.setTimeout(30000); // 30 seconds timeout
+  // Longer timeout for file uploads
+  if (req.path.includes('/upload') || req.path.includes('/profile')) {
+    req.setTimeout(120000); // 2 minutes for uploads
+    res.setTimeout(120000); // 2 minutes for uploads
+  } else {
+    req.setTimeout(30000); // 30 seconds for other requests
+    res.setTimeout(30000); // 30 seconds for other requests
+  }
   next();
 });
 
@@ -88,7 +94,25 @@ app.use('*', (req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
+  
+  // Handle connection reset errors
+  if (err.code === 'ECONNRESET') {
+    return res.status(408).json({
+      success: false,
+      message: 'Connection was reset. Please try again.'
+    });
+  }
+  
+  // Handle timeout errors
+  if (err.code === 'ETIMEDOUT') {
+    return res.status(408).json({
+      success: false,
+      message: 'Request timeout. Please try again.'
+    });
+  }
+  
   res.status(err.status || 500).json({
+    success: false,
     message: err.message || 'Internal server error',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
