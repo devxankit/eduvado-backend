@@ -41,22 +41,8 @@ const storage = new CloudinaryStorage({
   }
 });
 
-// Add event listeners to track Cloudinary operations
-storage.on('file', (file) => {
-  console.log('📁 Cloudinary storage - file event:', file.originalname);
-});
-
-storage.on('stream', (stream) => {
-  console.log('🌊 Cloudinary storage - stream event');
-});
-
-storage.on('complete', (file) => {
-  console.log('✅ Cloudinary storage - complete event:', file.originalname);
-});
-
-storage.on('error', (error) => {
-  console.log('❌ Cloudinary storage - error event:', error);
-});
+// CloudinaryStorage doesn't support event listeners like regular multer storage
+// Logging will be handled in the middleware instead
 
 // Configure multer
 const upload = multer({
